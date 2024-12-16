@@ -1,46 +1,39 @@
 import numpy as np
 
-# Параметры
-a = 3  # sqrt(9)
+# parameter values
+a = 3
 T = 1000
 L = 1
 n = 100
 m = 1000
 h = L / n
 tau = T / m
-alpha = a**2 * tau / h**2
+gamma = pow(a, 2)*tau/pow(h, 2)
 
-# Сетка
+# makes a net
 x = np.linspace(0, L, n+1)
 t = np.linspace(0, T, m+1)
 
-# Начальное условие
+# The initial condition
 u = np.zeros((m+1, n+1))
-u[0, :] = 1 - x**2
+u[0, :] = 1 - pow(x,2)
 
-def thomas_algorithm(a, b, c, d):
-    """
-    Решение трехдиагональной системы методом прогонки.
-    a: нижняя диагональ (длина n-1),
-    b: главная диагональ (длина n),
-    c: верхняя диагональ (длина n-1),
-    d: правая часть (длина n).
-    """
-    n = len(b)
-    # Прямой ход
-    c_prime = np.zeros(n-1)
-    d_prime = np.zeros(n)
-    
-    c_prime[0] = c[0] / b[0]
-    d_prime[0] = d[0] / b[0]
-    
-    for i in range(1, n-1):
-        temp = b[i] - a[i-1] * c_prime[i-1]
-        c_prime[i] = c[i] / temp
-        d_prime[i] = (d[i] - a[i-1] * d_prime[i-1]) / temp
-    
-    d_prime[n-1] = (d[n-1] - a[n-2] * d_prime[n-2]) / (b[n-1] - a[n-2] * c_prime[n-2])
-    
+# Bondary conditions
+def g_left(u1):
+    return u1
+
+def g_right(un_, h):
+    return un_ * (1 + 7*h) - 2*h
+
+# Method of running the solution of SLAE
+def ttridiag_solver(a, b, c, d):
+    N = len(b) # length of array b equal dimension of matrix
+    # straight stroke: brings the matrix to an upper-triangular shape
+    for i in range(1, N):
+        
+
+
+
     # Обратный ход
     x = np.zeros(n)
     x[-1] = d_prime[-1]
@@ -50,17 +43,12 @@ def thomas_algorithm(a, b, c, d):
     return x
 
 
-# Граничные условия
-def g_left(u1):
-    return u1
 
-def g_right(un, h):
-    return un * (1 + 7*h) - 2*h
 
 # Матрица трехдиагональной системы
-a_diag = -alpha * np.ones(n-2)  # нижняя диагональ
-b_diag = (1 + 2*alpha) * np.ones(n-1)  # главная диагональ
-c_diag = -alpha * np.ones(n-2)  # верхняя диагональ
+a_diag = -gamma * np.ones(n-2)  # нижняя диагональ
+b_diag = (1 + 2*gamma) * np.ones(n-1)  # главная диагональ
+c_diag = -gamma * np.ones(n-2)  # верхняя диагональ
 
 # Основной цикл по времени
 for j in range(m):
@@ -68,8 +56,8 @@ for j in range(m):
     b = u[j, 1:n] + tau * 5 * np.sin(t[j+1])
     
     # Учет граничных условий
-    b[0] += alpha * g_left(u[j+1, 1])  # левая граница
-    b[-1] += alpha * g_right(u[j+1, n], h)  # правая граница
+    b[0] += gamma * g_left(u[j+1, 1])  # левая граница  
+    b[-1] += gamma * g_right(u[j+1, n], h)  # правая граница
     
     # Решение методом прогонки
     u_inner = thomas_algorithm(a_diag, b_diag, c_diag, b)
