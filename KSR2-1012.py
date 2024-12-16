@@ -1,68 +1,110 @@
 import numpy as np
+import tkinter as tk
+import matplotlib
 
-# parameter values
+# Parametres
 a = 3
 T = 1000
 L = 1
-n = 100
-m = 1000
-h = L / n
-tau = T / m
-gamma = pow(a, 2)*tau/pow(h, 2)
+default_n = 100
+default_m = 1000
 
-# makes a net
-x = np.linspace(0, L, n+1)
-t = np.linspace(0, T, m+1)
-
-# The initial condition
-u = np.zeros((m+1, n+1))
-u[0, :] = 1 - pow(x,2)
-
-# Bondary conditions
+# Bounds
 def g_left(u1):
     return u1
 
-def g_right(un_, h):
-    return un_ * (1 + 7*h) - 2*h
+def g_right(un_1, h):
+    return un_1 * (1 + 7 * h) - 2 * h
 
-# Method of running the solution of SLAE
-def ttridiag_solver(a, b, c, d):
-    N = len(b) # length of array b equal dimension of matrix
-    # straight stroke: brings the matrix to an upper-triangular shape
-    for i in range(1, N):
-        
+# Running method for solving SLAE
+def tridiag_solver(A, b):
+    N = len(A)
+    alpha = np.zeros(N)
+    beta = np.zeros(N)
 
+    lower = np.zeros(N-1)
+    main = np.zeros(N)
+    upper = np.zeros(N-1)
 
-
-    # Обратный ход
-    x = np.zeros(n)
-    x[-1] = d_prime[-1]
-    for i in range(n-2, -1, -1):
-        x[i] = d_prime[i] - c_prime[i] * x[i+1]
+    for i in range (0, N):
+        main[i] = A[i][i]
     
-    return x
+    for i in range (0, N-1):
+        lower[i] = A[i+1][i]
+        upper[i] = A[i][i+1]
 
 
+    # Normalization of matrix
+    upper[0] /= main[0]
+    b[0] /= main[0]
+    main[0] = 1.
 
+    lower[N-2] /= main[N-1]
+    b[N-1] /= main[N-1]
+    main[N-1] = 1.
 
-# Матрица трехдиагональной системы
-a_diag = -gamma * np.ones(n-2)  # нижняя диагональ
-b_diag = (1 + 2*gamma) * np.ones(n-1)  # главная диагональ
-c_diag = -gamma * np.ones(n-2)  # верхняя диагональ
+    alpha[1] = -upper[0]
+    beta[1] = b[0]
+    # forward elimination
 
-# Основной цикл по времени
-for j in range(m):
-    # Формируем правую часть
-    b = u[j, 1:n] + tau * 5 * np.sin(t[j+1])
+    for i in range (0, N-1):
+        alpha[i+1] = upper[i] / (-main[i] - alpha[i] * lower[i])
+        beta[i+1] = (-b[i] + lower[i] * beta[i]) / (-main[i] - alpha[i] * lower[i])
+
+    y = np.zeros(N)
+    y[N-1] = ( b[N-1] + A[N-1][N-2] * beta[N-1]) / (1 + A[N-1][N-2] * alpha[N-1])
     
-    # Учет граничных условий
-    b[0] += gamma * g_left(u[j+1, 1])  # левая граница  
-    b[-1] += gamma * g_right(u[j+1, n], h)  # правая граница
+    print (alpha, beta)
+
+    # back subtitution
+    for i in range (N-2, 0, -1):
+        y[i] = alpha[i+1] * y[i+1] + beta[i+1]
+
+    #print (y)
+    return y
+
+# def main_model(default_n, default_m):
+    h = L / default_n
+    tau = T / default_m
+    gamma = pow(a, 2) * tau / pow(h, 2)
+
+    # a net
+    x = np.linspace(0, L, default_n + 1)
+    t = np.linspace(0, T, default_m + 1)
+
+    # Initial condition
+    u = np.zeros((default_m + 1, default_n + 1))
+    u[0, :] = 1 - pow(x, 2)
+
+    # makes a tridiagonal metrix
+    lower_diag = -gamma * np.ones(default_n - 1)            # lower diagonal (size: n-1)
+    main_diag = (1 / tau + 2 * gamma) * np.ones(default_n)  # main diagonal (size:n)
+    upper_diag = -gamma * np.ones(default_n - 1)            # upper diagonal (size: n-1)
     
-    # Решение методом прогонки
-    u_inner = thomas_algorithm(a_diag, b_diag, c_diag, b)
+    for j in range(default_m):
+        # makes the right part
+        right_part = u[j, 1:default_n] + tau * 5 * np.sin(t[j + 1])
     
-    # Заполнение нового слоя
-    u[j+1, 1:n] = u_inner
-    u[j+1, 0] = g_left(u[j+1, 1])
-    u[j+1, n] = g_right(u[j+1, n-1], h)
+        # check the bounds
+        right_part[0] += gamma * g_left(u[j + 1, 1])            # left bound
+        right_part[-1] += gamma * g_right(u[j + 1, default_n - 1], h)   # right bound
+    
+        # dolving the system
+        u_inner = tridiag_solver(lower_diag, main_diag[1:default_n], upper_diag, right_part)
+
+        # filling in a new layer
+        u[j + 1, 1:default_n] = u_inner
+        u[j + 1, 0] = g_left(u[j + 1, 1])
+        u[j + 1, default_n] = g_right(u[j + 1, default_n - 1], h)
+
+    return u
+
+# def test_tridiag_solver():
+    # 1st test: simple case
+    A = [[3, 1, 0, 0], [1, 2, 1, 0], [0, 3, 6, 2],[0, 0, 5, 7]]
+    b = [4, 4, 11, 12]
+    tridiag_solver(A, b)
+
+A = [[3, 1, 0, 0], [1, 2, 1, 0], [0, 3, 6, 2], [0, 0, 5, 7]]
+b = [4, 4, 11, 12]
+tridiag_solver(A, b)
