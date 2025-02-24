@@ -1,139 +1,112 @@
+# импорт библиотек и функций
 import numpy as np
+import matplotlib
+matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter import ttk, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 
-# Метод прогонки для решения трехдиагональной матрицы
-def tridiag_solver(a, b, c, d):
-
-    n = len(d)
-    alpha = np.zeros(n-1)
-    beta = np.zeros(n)
-    
-
-    if abs(b[0]) < 1e-15:   # исключение, если деление на 0
-        raise ValueError("Нулевой элемент на главной диагонали (b[0] = 0).")
-
-    # Прямой ход прогонки
-    alpha[0] = c[0] / b[0]
-    beta[0] = d[0] / b[0]
-    
-    for i in range(1, n-1):
-        denom = b[i] - a[i-1]*alpha[i-1]
-        if abs(denom) < 1e-15:
-            raise ValueError("Деление на ноль при прогонке.")
-        alpha[i] = c[i] / denom
-        beta[i] = (d[i] - a[i-1]*beta[i-1]) / denom
-    
-    denom = b[-1] - a[-2]*alpha[-2]
-    if abs(denom) < 1e-15:
-        raise ValueError("Деление на ноль при прогонке (последняя строка).")
-    beta[-1] = (d[-1] - a[-2]*beta[-2]) / denom
-    
-    # Обратный ход
-    x = np.zeros(n)
-    x[-1] = beta[-1]
-    for i in range(n-2, -1, -1):
-        x[i] = beta[i] - alpha[i]*x[i+1]
-
-    # возвращает массив решений СЛАУ
-    return x
-
-def solve_heat_equation(n, m):
-    """
-    Нестационарное уравнение теплопроводности:
-        u_t = 9*u_xx + 5*sin(t), x = [0,1]; t = [0,1000]
-        ГУ:
-        u_x(0,t)=0 
+"""
+Нестационарное уравнение теплопроводности:
+    u_t = 9*u_xx + 5*sin(t), x = [0,1]; t = [0,1000]
+    НУ:
+        u(x, 0) = 1 - x^2
+    ГУ:
+        u_x(0,t)=0
         u_x(1,t)=7*(u(1,t)-2/7)
-    """
+"""
+
+
+# основная функция программмы, backend
+def solve_heat_equation(n, m):
     L = 1.0         # длина стержня
     T = 1000.0      # время моделирования
-    h = L / n       # шаг по длине
-    tau = T / m     # шаг по времени
-    a_coef = 9.0    # коэффициент температуропроводности
+    h = L / n       # пространственный шаг
+    tau = T / m     # временной шаг
     
-    x = np.linspace(0, L, n+1)
-    t = np.linspace(0, T, m+1)
-    u = np.zeros((n+1, m+1))
+    # задаем линейные пространства x, t и u
+    x = np.linspace(0, L, n + 1)
+    t = np.linspace(0, T, m + 1)
+    u = np.zeros((n+1, m+1))        # пространство решений
 
-    # Начальное условие
-    u[:, 0] = 1 - x**2
+    # начальное условие
+    u[:, 0] = 1.0 - x**2
 
-    A = a_coef * tau / h**2
-    
-    # запуск цикла: проходим каждый слой, для каждого слоя решаем СЛАУ и рисуем решения
-    for j in range(m):
-        a_arr = np.full(n-1, -A)         
-        b_arr = np.full(n-1, 1 + 2*A)    
-        c_arr = np.full(n-1, -A)         
-        d_arr = u[1:n, j] + tau*5*np.sin(t[j])
-        
-        # записываем первый элемент в столбец b
-        d_arr[0] += A * u[0, j]
-        
-        # Решаем
-        try:
-            u_internal = tridiag_solver(a_arr, b_arr, c_arr, d_arr)
-        except ValueError as e:
-            messagebox.showerror("Ошибка", str(e))
-            return None, None, None
-        
-        # запись решений в отдельный массив
-        u[1:n, j+1] = u_internal
-        u[0, j+1] = u[1, j+1]
+    # коэффициенты матрицы СЛАУ (для метода прогонки)
+    A = 9.0 / h**2                  # нижняя диагональ
+    B = 9.0 / h**2                  # верхняя диагональ
+    C = 18.0 / h**2 + 1.0 / tau     # главная диагональ
 
-        
-        denom = (1 - 7*h)
-        if abs(denom) < 1e-15:
-            messagebox.showwarning("Предупреждение","(1 - 7*h) близко к нулю!")
-        u[n, j+1] = (u[n-1, j+1] - 2*h) / denom
-    
+    # коэффициенты альфа и бета для метода прогонки. Беру с запасом, так как подсчет начинается с i = 1
+    alpha = np.zeros(n + 1)
+    beta  = np.zeros(n + 1)
+
+    # цикл временных итераций, т.е. j = 1, ..., m
+    for j in range(1, m + 1):
+
+        # метод прогонки для решения СЛАУ
+
+        # Прямой ход прогонки
+        alpha[1] = 1.0
+        beta[1]  = 0.0
+
+        for i in range(1, n):
+            phi = 5.0 * np.sin(t[j]) + u[i, j-1] / float(tau)  # правая часть СЛАУ 
+            if abs(C - A * alpha[i]) < 1e-15:           # обработка ошибки деления на ноль при прямом ходе прогонки
+                raise ValueError("Деление на слишком малое число в прямом ходе прогонки.")
+            
+            alpha[i+1] = B / (C - A * alpha[i])         # подсчет коэффициентов альфа
+            beta[i+1]  = (phi + A * beta[i]) / (C - A * alpha[i])   # подсчет коэффициентов бета
+
+        u[n, j] = (beta[n] + 2.0*h) / (1 + 7*h - alpha[n])  # учёт правой границы и ее граничного условия
+
+        # Обратный ход прогонки
+        for i in range(n-1, -1, -1):
+            u[i, j] = alpha[i+1] * u[i+1, j] + beta[i+1]
+
+        u[0, j] = u[1, j] # учет ГУ для левого конца стержня
+
     return x, t, u
-
 
 # функция построения графиков
 def plot_results(ax1, ax2, cax, x, t, u, t0):
-
-    # Очищаем то, что было:
+    # очистка осей перед новой отрисовкой
     ax1.cla()
     ax2.cla()
     cax.cla()
-    
-    # 1) Градиентный график u(x,t)
+
+    # градиентный график u(t,x)
     X, T_grid = np.meshgrid(x, t)
     mesh = ax1.pcolormesh(X, T_grid, u.T, shading='auto', cmap='viridis')
     ax1.set_title('Распределение температуры')
     ax1.set_xlabel('x')
     ax1.set_ylabel('t')
-    
-    # Связь colorbar именно с осью cax
+
     cb = ax1.figure.colorbar(mesh, cax=cax)
     cb.set_label('u(x,t)')
-    
-    # 2) График u(x, t0)
+
+    # построение графика среза при заданном t0
     if t0 > t[-1]:
         t0 = t[-1]
     idx_t0 = np.argmin(np.abs(t - t0))
-
     ax2.plot(x, u[:, idx_t0], 'r-', label=f't = {t[idx_t0]:.2f}')
     ax2.set_title('Срез при t0')
     ax2.set_xlabel('x')
     ax2.set_ylabel('u(x,t0)')
     ax2.legend()
 
-
-def display_solution(text_widget, x, t, u):     # вывод решения в текст справа в окне
+# функця вывода массива решения u(x,t)
+def display_solution(text_widget, x, t, u):
     text_widget.configure(state='normal')
     text_widget.delete("1.0", tk.END)
 
     text_widget.insert(tk.END, "Массив решений u(x,t):\n\n")
     
-    header = " t \\ x   | " + "  ".join(f"{xx:>8.4f}" for xx in x) + "\n"
+    header = "  t \\ x   | " + "  ".join(f"{xx:>8.4f}" for xx in x) + "\n"
     text_widget.insert(tk.END, header)
-    text_widget.insert(tk.END, "-"*len(header) + "\n")
+    text_widget.insert(tk.END, "-" * len(header) + "\n")
     
     for j in range(len(t)):
         line = f"{t[j]:>8.2f} | " + "  ".join(f"{u[i, j]:>8.4f}" for i in range(len(x))) + "\n"
@@ -141,31 +114,32 @@ def display_solution(text_widget, x, t, u):     # вывод решения в �
 
     text_widget.configure(state='disabled')
 
-def on_run(entry_n, entry_m, entry_t0, ax1, ax2, cax, canvas, text_widget):     # функция ввода данных и запуска решений и построений графиков
+# функция работы интерфейса, его запуска
+def on_run(entry_n, entry_m, entry_t0, ax1, ax2, cax, canvas, text_widget):
     try:
         n = int(entry_n.get())
         m = int(entry_m.get())
         t0 = float(entry_t0.get())
         if n <= 0 or m <= 0:
             raise ValueError
-    except ValueError:
+    except ValueError:      # обработка неправильного ввода
         messagebox.showerror("Ошибка ввода",
-            "n и m — положительные целые; t0 — вещественное число.")
+                             "n и m — положительные целые; t0 — вещественное число.")
         return
 
-    # Решение
+    # Запуск решения
     x, t, U = solve_heat_equation(n, m)
     if x is None or t is None or U is None:
         return
     
-    # Графики
+    # Построение графиков
     plot_results(ax1, ax2, cax, x, t, U, t0)
     canvas.draw()
 
-    # Таблица решений
+    # Вывод в текстовое поле
     display_solution(text_widget, x, t, U)
 
-
+# main, функция создаёт интерфейс (новое окно, кнопки, поля ввода и т.д.)
 def main():
     root = tk.Tk()
     root.title("10(4): Нестационарное уравнение теплопроводности")
@@ -173,7 +147,7 @@ def main():
     mainframe = ttk.Frame(root, padding="10 10 10 10")
     mainframe.pack(side='top', fill='both', expand=True)
 
-    # Поля для ввода
+    # Поля ввода (n, m, t0)
     ttk.Label(mainframe, text="Число узлов (n):").grid(row=0, column=0, sticky='e')
     entry_n = ttk.Entry(mainframe, width=15)
     entry_n.grid(row=0, column=1, padx=5, pady=5)
@@ -189,10 +163,10 @@ def main():
     display_frame = ttk.Frame(mainframe)
     display_frame.grid(row=4, column=0, columnspan=2, sticky='nsew', pady=10)
 
-    fig = plt.Figure(figsize=(7, 9))  
-    ax1 = fig.add_axes([0.10, 0.55, 0.70, 0.40])  
-    ax2 = fig.add_axes([0.10, 0.08, 0.70, 0.35])  
-    cax = fig.add_axes([0.82, 0.55, 0.04, 0.40])  
+    fig = plt.Figure(figsize=(7, 9))
+    ax1 = fig.add_axes([0.10, 0.55, 0.70, 0.40])
+    ax2 = fig.add_axes([0.10, 0.08, 0.70, 0.35])
+    cax = fig.add_axes([0.82, 0.55, 0.04, 0.40])
 
     canvas = FigureCanvasTkAgg(fig, master=display_frame)
     canvas.get_tk_widget().pack(side='left', fill='both', expand=True)
@@ -221,6 +195,6 @@ def main():
 
     root.mainloop()
 
-
+# запуск программы
 if __name__ == "__main__":
     main()
