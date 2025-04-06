@@ -7,7 +7,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-
 """
 Нестационарное уравнение теплопроводности:
     u_t = 9*u_xx + 5*sin(t), x = [0,1]; t = [0,1000]
