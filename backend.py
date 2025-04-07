@@ -69,16 +69,31 @@ def solve_heat_equation(n, m):
 
     return x, t, u
 
-# функция построения графиков
-def plot_results(ax1, ax2, cax, x, t, u, t0):
-    # очистка осей перед новой отрисовкой
+def calculate_error(u_main, u_control, n_main, m_main):
+    """Вычисление средней и максимальной погрешности"""
+    total_error = 0.0
+    max_error = 0.0
+    count = 0
+    for j in range(0, m_main+1):
+        for i in range(0, n_main+1):
+            i_control = i * 2
+            j_control = j * 4
+            current_error = abs(u_main[i, j] - u_control[i_control, j_control])
+            total_error += current_error
+            if current_error > max_error:
+                max_error = current_error
+            count += 1
+    avg_error = total_error / count if count > 0 else 0.0
+    return avg_error, max_error
+
+def plot_results(ax1, ax2, cax, x, t, u, j, show_control):
     ax1.cla()
     ax2.cla()
     cax.cla()
 
-    # градиентный график u(t,x)
     X, T_grid = np.meshgrid(x, t)
     mesh = ax1.pcolormesh(X, T_grid, u.T, shading='auto', cmap='viridis')
+    
     ax1.set_title('Распределение температуры')
     ax1.set_xlabel('x')
     ax1.set_ylabel('t')
@@ -86,14 +101,12 @@ def plot_results(ax1, ax2, cax, x, t, u, t0):
     cb = ax1.figure.colorbar(mesh, cax=cax)
     cb.set_label('u(x,t)')
 
-    # построение графика среза при заданном t0
-    if t0 > t[-1]:
-        t0 = t[-1]
-    idx_t0 = np.argmin(np.abs(t - t0))
-    ax2.plot(x, u[:, idx_t0], 'r-', label=f't = {t[idx_t0]:.2f}')
-    ax2.set_title('Срез при t0')
+    if j >= len(t):
+        j = len(t) - 1
+    ax2.plot(x, u[:, j], 'r-', label=f'Слой {j}, t = {t[j]:.2f}')
+    ax2.set_title(f'График слоя № {j}, t = {t[j]:.2f}')
     ax2.set_xlabel('x')
-    ax2.set_ylabel('u(x,t0)')
+    ax2.set_ylabel(f'u(x,t{j})')
     ax2.legend()
 
 # функця вывода массива решения u(x,t)
@@ -114,83 +127,93 @@ def display_solution(text_widget, x, t, u):
     text_widget.configure(state='disabled')
 
 # функция работы интерфейса, его запуска
-def on_run(entry_n, entry_m, entry_t0, ax1, ax2, cax, canvas, text_widget):
+def on_run(entry_n, entry_m, entry_j, ax1, ax2, cax, canvas, text_widget, 
+          check_control, avg_error_var, max_error_var):
     try:
         n = int(entry_n.get())
         m = int(entry_m.get())
-        t0 = float(entry_t0.get())
-        if n <= 0 or m <= 0:
+        j = int(entry_j.get())
+        if n <= 0 or m <= 0 or j < 0 or j > m:
             raise ValueError
-    except ValueError:      # обработка неправильного ввода
-        messagebox.showerror("Ошибка ввода",
-                             "n и m — положительные целые; t0 — вещественное число.")
+    except ValueError:
+        messagebox.showerror("Ошибка ввода", "n и m — положительные целые; j — целое от 0 до m.")
         return
 
-    # Запуск решения
     x, t, U = solve_heat_equation(n, m)
-    if x is None or t is None or U is None:
-        return
     
-    # Построение графиков
-    plot_results(ax1, ax2, cax, x, t, U, t0)
-    canvas.draw()
+    avg_error = 0.0
+    max_error = 0.0
+    show_control = check_control.instate(['selected'])
+    
+    if show_control:
+        n_control = 2 * n
+        m_control = 4 * m
+        x_control, t_control, U_control = solve_heat_equation(n_control, m_control)
+        avg_error, max_error = calculate_error(U, U_control, n, m)
 
-    # Вывод в текстовое поле
+    # Обновление значений погрешности
+    avg_error_var.set(f"{avg_error:.6f}" if show_control else "")
+    max_error_var.set(f"{max_error:.6f}" if show_control else "")
+    
+    plot_results(ax1, ax2, cax, x, t, U, j, show_control)
+    canvas.draw()
+    
+    # Вывод данных в текстовое поле
+    text_widget.configure(state='normal')
+    text_widget.delete("1.0", tk.END)
     display_solution(text_widget, x, t, U)
+    text_widget.configure(state='disabled')
 
 # main, функция создаёт интерфейс (новое окно, кнопки, поля ввода и т.д.)
 def main():
     root = tk.Tk()
     root.title("10(4): Нестационарное уравнение теплопроводности")
-
     mainframe = ttk.Frame(root, padding="10 10 10 10")
     mainframe.pack(side='top', fill='both', expand=True)
 
-    # Поля ввода (n, m, t0)
-    ttk.Label(mainframe, text="Число узлов (n):").grid(row=0, column=0, sticky='e')
-    entry_n = ttk.Entry(mainframe, width=15)
+    # Левая панель: элементы управления
+    left_panel = ttk.Frame(mainframe)
+    left_panel.grid(row=0, column=0, sticky='nsew')
+
+    # Правая панель: статистика погрешности
+    right_panel = ttk.Frame(mainframe)
+    right_panel.grid(row=0, column=1, sticky='nsew', padx=10)
+
+    # Элементы управления в левой панели
+    ttk.Label(left_panel, text="Число узлов (n):").grid(row=0, column=0, sticky='w')
+    entry_n = ttk.Entry(left_panel, width=15)
     entry_n.grid(row=0, column=1, padx=5, pady=5)
 
-    ttk.Label(mainframe, text="Число слоёв (m):").grid(row=1, column=0, sticky='e')
-    entry_m = ttk.Entry(mainframe, width=15)
+    ttk.Label(left_panel, text="Число слоёв (m):").grid(row=1, column=0, sticky='w')
+    entry_m = ttk.Entry(left_panel, width=15)
     entry_m.grid(row=1, column=1, padx=5, pady=5)
 
-    ttk.Label(mainframe, text="Момент времени (t0):").grid(row=2, column=0, sticky='e')
-    entry_t0 = ttk.Entry(mainframe, width=15)
-    entry_t0.grid(row=2, column=1, padx=5, pady=5)
+    ttk.Label(left_panel, text="Номер слоя (j):").grid(row=2, column=0, sticky='w')
+    entry_j = ttk.Entry(left_panel, width=15)
+    entry_j.grid(row=2, column=1, padx=5, pady=5)
 
-    display_frame = ttk.Frame(mainframe)
-    display_frame.grid(row=4, column=0, columnspan=2, sticky='nsew', pady=10)
-
-    fig = plt.Figure(figsize=(7, 9))
-    ax1 = fig.add_axes([0.10, 0.55, 0.70, 0.40])
-    ax2 = fig.add_axes([0.10, 0.08, 0.70, 0.35])
-    cax = fig.add_axes([0.82, 0.55, 0.04, 0.40])
-
-    canvas = FigureCanvasTkAgg(fig, master=display_frame)
-    canvas.get_tk_widget().pack(side='left', fill='both', expand=True)
-
-    text_frame = ttk.Frame(display_frame)
-    text_frame.pack(side='right', fill='both', expand=True)
-
-    text_widget = tk.Text(text_frame, wrap='none', height=25)
-    text_widget.pack(side='left', fill='both', expand=True)
-    scroll_y = tk.Scrollbar(text_frame, orient='vertical', command=text_widget.yview)
-    scroll_y.pack(side='right', fill='y')
-    text_widget.configure(yscrollcommand=scroll_y.set)
+    check_control = ttk.Checkbutton(left_panel, text="Включить контрольную сетку")
+    check_control.grid(row=3, column=0, columnspan=2, pady=5)
 
     run_button = ttk.Button(
-        mainframe, text="Решить и Построить",
-        command=lambda: on_run(
-            entry_n, entry_m, entry_t0,
-            ax1, ax2, cax, canvas,
-            text_widget
-        )
+        left_panel, text="Решить и Построить",
+        command=lambda: on_run(entry_n, entry_m, entry_j, ax1, ax2, cax, canvas, text_widget, check_control,avg_error_var, max_error_var)
     )
-    run_button.grid(row=3, column=0, columnspan=2, pady=5)
+    run_button.grid(row=4, column=0, columnspan=2, pady=10)
 
-    mainframe.columnconfigure(1, weight=1)
-    mainframe.rowconfigure(4, weight=1)
+    # Статистика погрешности в правой панели
+    avg_error_var = tk.StringVar()
+    max_error_var = tk.StringVar()
+    
+    ttk.Label(right_panel, text="Средняя погрешность:").grid(row=0, column=0, sticky='w')
+    ttk.Label(right_panel, textvariable=avg_error_var).grid(row=0, column=1, sticky='w')
+    
+    ttk.Label(right_panel, text="Максимальное отклонение:").grid(row=1, column=0, sticky='w')
+    ttk.Label(right_panel, textvariable=max_error_var).grid(row=1, column=1, sticky='w')
+
+    # Графики и вывод данных
+    display_frame = ttk.Frame(mainframe)
+    display_frame.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=10)
 
     root.mainloop()
 
