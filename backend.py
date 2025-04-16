@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter import ttk, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import os
+import imageio
 
 """
 Нестационарное уравнение теплопроводности:
@@ -16,6 +18,14 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
         u_x(0,t)=0
         u_x(1,t)=7*(u(1,t)-2/7)
 """
+
+class DataContainer:
+    def __init__(self):
+        self.x = None
+        self.t = None
+        self.U = None
+
+data = DataContainer()
 
 # основная функция программы, backend
 def solve_heat_equation(n, m):
@@ -69,9 +79,18 @@ def calculate_error(u_main, u_control, n_main, m_main):
     max_error_layer = 0
     count = 0
     for j in range(m_main + 1):
+        # Исправление: множитель для времени стал 2 вместо 4
+        j_control = j * 2  # Было j * 4
+        
+        # Проверка выхода за границы
+        if j_control >= u_control.shape[1]:
+            continue
+            
         for i in range(n_main + 1):
             i_control = i * 2
-            j_control = j * 4
+            if i_control >= u_control.shape[0]:
+                continue
+                
             current_error = abs(u_main[i, j] - u_control[i_control, j_control])
             total_error += current_error
             if current_error > max_error:
@@ -102,17 +121,55 @@ def plot_results(ax1, ax2, cax, x, t, u, j, show_control):
     ax2.set_xlabel('x', fontsize=8)
     ax2.set_ylabel(f'u(x,t)', fontsize=8)
     ax2.legend(fontsize=8)
-    plt.subplots_adjust(hspace=0.5)
+    plt.subplots_adjust(hspace=0.5)    # Добавить после построения графика:
+    ax2.set_ylim(np.min(u)-0.1, np.max(u)+0.1)  # Фиксируем масштаб с небольшим запасом
+
+def create_animation():
+    if data.U is None or data.t is None or data.x is None:
+        messagebox.showerror("Ошибка", "Сначала выполните расчет!")
+        return
+
+    filenames = []
+    plt.ioff()
+    try:
+        for j in range(len(data.t)):
+            fig, ax = plt.subplots(figsize=(6,4))
+            ax.plot(data.x, data.U[:, j], 'r-')
+            ax.set_ylim(np.min(data.U)-0.1, np.max(data.U)+0.1)
+            ax.set_title(f"Слой {j}, t={data.t[j]:.2f}")
+            
+            frame_path = f"frame_{j:04d}.png"
+            fig.savefig(frame_path, dpi=100)
+            filenames.append(frame_path)
+            plt.close(fig)
+
+        with imageio.get_writer('animation.gif', mode='I', duration=0.1) as writer:
+            for filename in filenames:
+                image = imageio.imread(filename)
+                writer.append_data(image)
+
+        for filename in filenames:
+            os.remove(filename)
+
+        messagebox.showinfo("Успех", "Анимация создана: animation.gif!")
+        
+    except Exception as e:
+        messagebox.showerror("Ошибка", f"Ошибка: {str(e)}")
+    finally:
+        plt.ion()
 
 def display_solution(text_widget, x, t, u):
     text_widget.configure(state='normal')
     text_widget.delete("1.0", tk.END)
-    text_widget.insert(tk.END, "Массив решений u(x,t):\n\n")
-    header = "t \\ x    |" + "".join(f"{xx:>8.4f}" for xx in x) + "\n"
+    
+    header = "   t\\x   | " + " ".join(f"{xx:>7.3f}" for xx in x) + "\n"
+    text_widget.insert(tk.END, header)
     text_widget.insert(tk.END, "-"*len(header) + "\n")
+
     for j in range(len(t)):
-        line = f"{t[j]:>8.2f} | " + " ".join(f"{u[i,j]:>8.4f}" for i in range(len(x))) + "\n"
+        line = f"{t[j]:>8.2f} | " + " ".join(f"{u[i,j]:>7.4f}" for i in range(len(x))) + "\n"
         text_widget.insert(tk.END, line)
+    
     text_widget.configure(state='disabled')
 
 def on_run(entries, ax1, ax2, cax, canvas, text_widget, check_control, error_vars):
@@ -126,6 +183,7 @@ def on_run(entries, ax1, ax2, cax, canvas, text_widget, check_control, error_var
         return
 
     x, t, U = solve_heat_equation(n, m)
+    data.x, data.t, data.U = x, t, U  # Сохраняем данные
     
     # Определение слоя
     if t_input:
@@ -143,7 +201,7 @@ def on_run(entries, ax1, ax2, cax, canvas, text_widget, check_control, error_var
     avg_err, max_err, max_layer = 0.0, 0.0, 0
     if check_control.instate(['selected']):
         n_control = 2 * n
-        m_control = 4 * m
+        m_control = 2 * m
         _, _, U_control = solve_heat_equation(n_control, m_control)
         avg_err, max_err, max_layer = calculate_error(U, U_control, n, m)
 
@@ -158,6 +216,7 @@ def on_run(entries, ax1, ax2, cax, canvas, text_widget, check_control, error_var
     text_widget.delete("1.0", tk.END)
     display_solution(text_widget, x, t, U)
     text_widget.configure(state='disabled')
+    
 
 def main():
     root = tk.Tk()
@@ -203,7 +262,6 @@ def main():
     ttk.Label(right_panel, text="Слой с максимумом:").grid(row=2, column=0, sticky='w')
     ttk.Label(right_panel, textvariable=error_vars['layer']).grid(row=2, column=1)
 
-    # Графики и текст
     fig = plt.Figure(figsize=(12, 8))
     ax1 = fig.add_subplot(211)
     ax2 = fig.add_subplot(212)
@@ -220,6 +278,8 @@ def main():
     ttk.Button(left_panel, text="Рассчитать", 
               command=lambda: on_run(entries, ax1, ax2, cax, canvas, text_widget, check_control, error_vars)
               ).grid(row=5, columnspan=2, pady=10)
+
+    ttk.Button(left_panel, text="Создать анимацию", command=create_animation).grid(row=6, columnspan=2, pady=5)
 
     root.mainloop()
 
