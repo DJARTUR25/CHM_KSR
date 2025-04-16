@@ -158,6 +158,8 @@ def create_animation():
     finally:
         plt.ion()
 
+# бомбардиро крокодило
+
 def display_solution(text_widget, x, t, u):
     text_widget.configure(state='normal')
     text_widget.delete("1.0", tk.END)
