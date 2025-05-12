@@ -29,9 +29,8 @@ class DataContainer:
 data = DataContainer()
 
 # основная функция программы, backend
-def solve_heat_equation(n, m):
+def solve_heat_equation(n, m, T):
     L = 1.0        # длина стержня
-    T = 10.0      # время моделирования
     h = L / n       # пространственный шаг
     tau = T / m     # временной шаг
     
@@ -74,60 +73,81 @@ def solve_heat_equation(n, m):
 
     return x, t, u
 
-# Добавим новый класс для окна статистики
+# Измененный класс StatsWindow
 class StatsWindow(tk.Toplevel):
     def __init__(self, parent, deviations_data, x_main, t_main, x_control, t_control):
         super().__init__(parent)
-        self.title("Статистика отклонений по слоям")
-        self.geometry("800x400")
+        self.title("Статистика отклонений")
+        self.geometry("1000x400")
         
-        # Создаем Treeview для таблицы
-        self.tree = ttk.Treeview(self, columns=("layer", "n", "m", "2n", "2m", "max", "avg"), show="headings")
+        # Создаем Treeview с новыми колонками
+        self.tree = ttk.Treeview(self, columns=("layer", "t_j", "t_2j", "max_dev", "x_max", "avg_dev"), show="headings")
         
         # Настраиваем колонки
-        self.tree.heading("layer", text="№ слоя")
-        self.tree.heading("n", text="x (осн.)")
-        self.tree.heading("m", text="t (осн.)")
-        self.tree.heading("2n", text="x (контр.)")
-        self.tree.heading("2m", text="t (контр.)")
-        self.tree.heading("max", text="MAX")
-        self.tree.heading("avg", text="AVG")
+        self.tree.heading("layer", text="№ слоя (осн.)")
+        self.tree.heading("t_j", text="t_j (осн.)")
+        self.tree.heading("t_2j", text="t_2j (контр.)")
+        self.tree.heading("max_dev", text="Макс. отклонение")
+        self.tree.heading("x_max", text="x макс.")
+        self.tree.heading("avg_dev", text="Ср. отклонение")
         
-        # Настраиваем размеры колонок
-        self.tree.column("layer", width=70)
-        self.tree.column("n", width=100)
-        self.tree.column("m", width=100)
-        self.tree.column("2n", width=100)
-        self.tree.column("2m", width=100)
-        self.tree.column("max", width=100)
-        self.tree.column("avg", width=100)
+        # Ширина колонок
+        self.tree.column("layer", width=100)
+        self.tree.column("t_j", width=120)
+        self.tree.column("t_2j", width=120)
+        self.tree.column("max_dev", width=140)
+        self.tree.column("x_max", width=100)
+        self.tree.column("avg_dev", width=120)
         
-        # Добавляем прокрутку
+        # Прокрутка
         scroll = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
         
         self.tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
         
-        # Заполняем данными
+        # Заполнение данными
         for j in range(len(deviations_data)):
-            main_x = x_main[j//2] if j//2 < len(x_main) else 0
-            main_t = t_main[j//2] if j//2 < len(t_main) else 0
-            control_x = x_control[j] if j < len(x_control) else 0
-            control_t = t_control[j] if j < len(t_control) else 0
+            # Данные для основной сетки
+            main_t = t_main[j] 
             
+            # Данные для контрольной сетки (слой 2j)
+            control_t = t_control[j*2] if j*2 < len(t_control) else 0.0
+            
+            # Максимальное отклонение и его позиция
             max_dev = max(deviations_data[j])
-            avg_dev = sum(deviations_data[j])/len(deviations_data[j]) if deviations_data[j] else 0
+            max_idx = deviations_data[j].index(max_dev)
+            x_max = x_main[max_idx]
+            
+            # Среднее отклонение
+            avg_dev = sum(deviations_data[j]) / len(deviations_data[j]) if deviations_data[j] else 0.0
             
             self.tree.insert("", "end", values=(
                 j,
-                f"{main_x:.4f}",
                 f"{main_t:.2f}",
-                f"{control_x:.4f}",
                 f"{control_t:.2f}",
                 f"{max_dev:.6f}",
+                f"{x_max:.4f}",
                 f"{avg_dev:.6f}"
             ))
+
+# Модифицированная функция calculate_layer_errors
+def calculate_layer_errors(u_main, u_control):
+    deviations = []
+    for j in range(u_main.shape[1]):
+        layer_deviations = []
+        for i in range(u_main.shape[0]):
+            # Для контрольной сетки берем каждый второй слой и узел
+            i_control = i * 2
+            j_control = j * 2
+            if i_control >= u_control.shape[0] or j_control >= u_control.shape[1]:
+                continue
+                
+            current_error = abs(u_main[i, j] - u_control[i_control, j_control])
+            layer_deviations.append(current_error)
+        
+        deviations.append(layer_deviations)
+    return deviations
 
 def calculate_layer_errors(u_main, u_control):
     deviations = []
@@ -184,13 +204,14 @@ def show_stats(root, check_control, entries):  # <- Добавляем root в �
         return
     
     try:
+        T = float(entries['T'].get())
         n = int(entries['n'].get())
         m = int(entries['m'].get())
         
         # Получаем данные контрольной сетки
         n_control = 2 * n
         m_control = 2 * m
-        x_control, t_control, U_control = solve_heat_equation(n_control, m_control)
+        x_control, t_control, U_control = solve_heat_equation(n_control, m_control, T)
         
         # Рассчитываем отклонения по слоям
         deviations = calculate_layer_errors(data.U, U_control)
@@ -250,9 +271,10 @@ def create_animation(check_control, entries):
     try:
         U_control, x_control = None, None
         if check_control.instate(['selected']):
+            T = float(entries['T'].get())
             n_control = 2 * int(entries['n'].get())
             m_control = 2 * int(entries['m'].get())
-            x_control, _, U_control = solve_heat_equation(n_control, m_control)
+            x_control, _, U_control = solve_heat_equation(n_control, m_control, T)
 
         # Создание окна прогресса
         progress_window = tk.Toplevel()
@@ -322,8 +344,9 @@ def display_solution(text_widget, x, t, u):
     text_widget.configure(state='disabled')
 
 # функция выполнения программы
-def on_run(entries, ax1, ax2, cax, canvas, text_widget, check_control, error_vars):
+def on_run(entries, ax1, ax2, cax, canvas, text_widget, check_control, error_vars, t_j_var):
     try:
+        T = float(entries['T'].get())
         n = int(entries['n'].get())
         m = int(entries['m'].get())
         j_input = entries['j'].get()
@@ -332,14 +355,24 @@ def on_run(entries, ax1, ax2, cax, canvas, text_widget, check_control, error_var
         messagebox.showerror("Ошибка", "Некорректный ввод числовых значений")
         return
 
-    x, t, U = solve_heat_equation(n, m)
+    x, t, U = solve_heat_equation(n, m, T)
     data.x, data.t, data.U = x, t, U
+
+    if j_input:
+        try:
+            j = min(int(j_input), len(t)-1)
+            t_j_var.set(f"{t[j]:.2f}")
+        except:
+            t_j_var.set("Ошибка!")
+    else:
+        t_j_var.set("")
 
     x_control, t_control, U_control = None, None, None
     if check_control.instate(['selected']):
+        T = float(entries['T'].get())
         n_control = 2 * n
         m_control = 2 * m
-        x_control, t_control, U_control = solve_heat_equation(n_control, m_control)
+        x_control, t_control, U_control = solve_heat_equation(n_control, m_control, T)
 
     if t_input:
         try:
@@ -354,9 +387,10 @@ def on_run(entries, ax1, ax2, cax, canvas, text_widget, check_control, error_var
 
     avg_err, max_err, max_layer, max_x = 0.0, 0.0, 0, 0.0
     if check_control.instate(['selected']):
+        T = float(entries['T'].get())
         n_control = 2 * n
         m_control = 2 * m
-        _, _, U_control = solve_heat_equation(n_control, m_control)
+        _, _, U_control = solve_heat_equation(n_control, m_control, T)
         avg_err, max_err, max_layer, max_x = calculate_error(U, U_control, n, m)
 
     error_vars['avg'].set(f"{avg_err:.6f}")
@@ -382,24 +416,52 @@ def main():
     left_panel.pack(side='left', fill='y')
 
     entries = {}
-    ttk.Label(left_panel, text="Число узлов (n):").grid(row=0, column=0, sticky='w')
+
+    # Поле для T
+    ttk.Label(left_panel, text="Конечное значение T:").grid(row=0, column=0, sticky='w')
+    entries['T'] = ttk.Entry(left_panel, width=12)
+    entries['T'].insert(0, "10.0")
+    entries['T'].grid(row=0, column=1, pady=5)
+
+    # Поля для n и m с значениями по умолчанию
+    ttk.Label(left_panel, text="Число узлов (n):").grid(row=1, column=0, sticky='w')
     entries['n'] = ttk.Entry(left_panel, width=12)
-    entries['n'].grid(row=0, column=1)
+    entries['n'].insert(0, "50")  # Значение по умолчанию
+    entries['n'].grid(row=1, column=1)
 
-    ttk.Label(left_panel, text="Число слоев (m):").grid(row=1, column=0, sticky='w')
+    ttk.Label(left_panel, text="Число слоев (m):").grid(row=2, column=0, sticky='w')
     entries['m'] = ttk.Entry(left_panel, width=12)
-    entries['m'].grid(row=1, column=1)
+    entries['m'].insert(0, "100")  # Значение по умолчанию
+    entries['m'].grid(row=2, column=1)
 
-    ttk.Label(left_panel, text="Номер слоя (j):").grid(row=2, column=0, sticky='w')
+    # Поле для j с значением по умолчанию
+    ttk.Label(left_panel, text="Номер слоя (j):").grid(row=3, column=0, sticky='w')
     entries['j'] = ttk.Entry(left_panel, width=12)
-    entries['j'].grid(row=2, column=1)
+    entries['j'].insert(0, "0")  # Значение по умолчанию
+    entries['j'].grid(row=3, column=1)
 
-    ttk.Label(left_panel, text="Время (t):").grid(row=3, column=0, sticky='w')
+    # Метка времени слоя
+    t_j_var = tk.StringVar()
+    ttk.Label(left_panel, text="Время слоя (t_j):").grid(row=4, column=0, sticky='w')
+    ttk.Label(left_panel, textvariable=t_j_var).grid(row=4, column=1, sticky='w')
+
+    # Поле для времени t с значением по умолчанию
+    ttk.Label(left_panel, text="Время (t):").grid(row=5, column=0, sticky='w')
     entries['t'] = ttk.Entry(left_panel, width=12)
-    entries['t'].grid(row=3, column=1)
+    # entries['t'].insert(0, "0.0")  # Значение по умолчанию
+    entries['t'].grid(row=5, column=1)
 
     check_control = ttk.Checkbutton(left_panel, text="Контрольная сетка")
-    check_control.grid(row=4, columnspan=2, pady=5)
+    check_control.grid(row=6, columnspan=2, pady=5)
+
+    
+    ttk.Button(left_panel, text="Рассчитать", 
+              command=lambda: on_run(entries, ax1, ax2, cax, canvas, text_widget, check_control, error_vars, t_j_var)
+              ).grid(row=7, columnspan=2, pady=10)
+
+    ttk.Button(left_panel, text="Создать анимацию", command=lambda: create_animation(check_control, entries)).grid(row=8, columnspan=2, pady=5)
+
+    ttk.Button(left_panel, text="Статистика", command=lambda: show_stats(root, check_control, entries)).grid(row=9, columnspan=2, pady=5)
 
     error_vars = {
         'avg': tk.StringVar(),
@@ -410,11 +472,11 @@ def main():
     right_panel = ttk.Frame(mainframe)
     right_panel.pack(side='right', fill='y', padx=10)
 
-    ttk.Label(right_panel, text="Средняя погрешность:").grid(row=0, column=0, sticky='w')
+    ttk.Label(right_panel, text="Сред. отклонение:").grid(row=0, column=0, sticky='w')
     ttk.Label(right_panel, textvariable=error_vars['avg']).grid(row=0, column=1)
-    ttk.Label(right_panel, text="Максимальная погрешность:").grid(row=1, column=0, sticky='w')
+    ttk.Label(right_panel, text="Макс. отклонение:").grid(row=1, column=0, sticky='w')
     ttk.Label(right_panel, textvariable=error_vars['max']).grid(row=1, column=1)
-    ttk.Label(right_panel, text="Слой и x максимума:").grid(row=2, column=0, sticky='w')
+    ttk.Label(right_panel, text="(x_i, t_j):").grid(row=2, column=0, sticky='w')
     ttk.Label(right_panel, textvariable=error_vars['layer']).grid(row=2, column=1)
 
     fig = plt.Figure(figsize=(12, 8))
@@ -430,15 +492,21 @@ def main():
     scroll.pack(side='right', fill='y')
     text_widget.configure(yscrollcommand=scroll.set)
 
-    ttk.Button(left_panel, text="Рассчитать", 
-              command=lambda: on_run(entries, ax1, ax2, cax, canvas, text_widget, check_control, error_vars)
-              ).grid(row=5, columnspan=2, pady=10)
+    def update_t_j(event):
+        if data.t is None:  # Если данные еще не рассчитаны
+            t_j_var.set("Рассчитайте сначала!")
+            return
+        try:
+            j = int(entries['j'].get())
+            t_j_var.set(f"{data.t[j]:.2f}" if 0 <= j < len(data.t) else "Вне диапазона")
+        except ValueError:
+            t_j_var.set("Ошибка ввода")
 
-    ttk.Button(left_panel, text="Создать анимацию", command=lambda: create_animation(check_control, entries)).grid(row=6, columnspan=2, pady=5)
-
-    ttk.Button(left_panel, text="Статистика", command=lambda: show_stats(root, check_control, entries)).grid(row=7, columnspan=2, pady=5)
+    entries['j'].bind("<KeyRelease>", update_t_j)
 
     root.mainloop()
+
+
 
 if __name__ == "__main__":
     main()
